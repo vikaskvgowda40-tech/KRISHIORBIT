@@ -1,6 +1,6 @@
 import React from 'react';
 
-export default function LandingPage({ onOpenDashboard, onOpenCrops, onOpenFarmProfile, onOpenRotation }) {
+export default function LandingPage({ onOpenDashboard, onOpenCrops, onOpenFarmProfile, onOpenRotation, onOpenMarket }) {
   const pillars = [
     {
       title: 'NASA Satellite Observation',
@@ -36,6 +36,17 @@ export default function LandingPage({ onOpenDashboard, onOpenCrops, onOpenFarmPr
       icon: (
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path>
+        </svg>
+      ),
+    },
+    {
+      title: 'Market & Profit Intelligence',
+      description: 'Evaluating official APMC mandi prices, CACP statutory MSP benchmarks, market activity signals, and deterministic farm profitability.',
+      icon: (
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <line x1="18" y1="20" x2="18" y2="10"></line>
+          <line x1="12" y1="20" x2="12" y2="4"></line>
+          <line x1="6" y1="20" x2="6" y2="14"></line>
         </svg>
       ),
     },
@@ -98,6 +109,9 @@ export default function LandingPage({ onOpenDashboard, onOpenCrops, onOpenFarmPr
             </button>
             <button className="btn-secondary" onClick={onOpenRotation}>
               Rotation Simulator
+            </button>
+            <button className="btn-secondary" onClick={onOpenMarket}>
+              Market Intelligence
             </button>
           </div>
           <div className="hero-photo-credit">

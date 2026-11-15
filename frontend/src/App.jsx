@@ -5,6 +5,7 @@ import Dashboard from './components/Dashboard';
 import FarmProfile from './components/FarmProfile';
 import CropIntelligence from './components/CropIntelligence';
 import CropRotationSimulator from './components/CropRotationSimulator';
+import MarketIntelligence from './components/MarketIntelligence';
 import './App.css';
 
 export default function App() {
@@ -46,6 +47,8 @@ export default function App() {
         return 'Crop Intelligence';
       case 'rotation':
         return 'Crop Rotation Simulator';
+      case 'market':
+        return 'Market & Profit Intelligence';
       default:
         return 'Overview';
     }
@@ -86,6 +89,7 @@ export default function App() {
               onOpenCrops={() => setCurrentView('crops')}
               onOpenFarmProfile={() => setCurrentView('farm-profile')}
               onOpenRotation={() => setCurrentView('rotation')}
+              onOpenMarket={() => setCurrentView('market')}
             />
           )}
           {currentView === 'dashboard' && (
@@ -94,6 +98,7 @@ export default function App() {
               onOpenCrops={() => setCurrentView('crops')}
               onOpenFarmProfile={() => setCurrentView('farm-profile')}
               onOpenRotation={() => setCurrentView('rotation')}
+              onOpenMarket={() => setCurrentView('market')}
             />
           )}
           {currentView === 'farm-profile' && (
@@ -106,6 +111,13 @@ export default function App() {
             <CropRotationSimulator
               onOpenFarmProfile={() => setCurrentView('farm-profile')}
               onOpenCrops={() => setCurrentView('crops')}
+            />
+          )}
+          {currentView === 'market' && (
+            <MarketIntelligence
+              onOpenFarmProfile={() => setCurrentView('farm-profile')}
+              onOpenCrops={() => setCurrentView('crops')}
+              onOpenRotation={() => setCurrentView('rotation')}
             />
           )}
         </main>

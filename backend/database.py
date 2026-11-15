@@ -68,6 +68,28 @@ def init_db():
             );
         """)
 
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS local_mandi_observations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                crop_name TEXT NOT NULL,
+                commodity TEXT NOT NULL,
+                state TEXT NOT NULL DEFAULT 'Karnataka',
+                district TEXT NOT NULL,
+                mandi_name TEXT NOT NULL,
+                variety TEXT,
+                min_price REAL,
+                max_price REAL,
+                modal_price REAL NOT NULL,
+                arrival_quantity REAL,
+                traded_quantity REAL,
+                unit TEXT DEFAULT '₹/quintal',
+                data_date TEXT NOT NULL,
+                source_type TEXT NOT NULL DEFAULT 'farmer_entry',
+                notes TEXT,
+                created_at TEXT NOT NULL
+            );
+        """)
+
         # Auto-seed crops if table is empty
         cursor.execute("SELECT COUNT(*) FROM crops")
         if cursor.fetchone()[0] == 0:
@@ -473,5 +495,105 @@ def get_crops_by_category(category: str) -> List[Dict[str, Any]]:
         )
         rows = cursor.fetchall()
         return [row_to_dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def add_local_mandi_observation(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Add a farmer-reported or locally observed APMC mandi price record."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        now_iso = datetime.now().isoformat()
+        cursor.execute("""
+            INSERT INTO local_mandi_observations (
+                crop_name,
+                commodity,
+                state,
+                district,
+                mandi_name,
+                variety,
+                min_price,
+                max_price,
+                modal_price,
+                arrival_quantity,
+                traded_quantity,
+                unit,
+                data_date,
+                source_type,
+                notes,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            data.get("crop_name", "").strip(),
+            data.get("commodity", "").strip() or data.get("crop_name", "").strip(),
+            data.get("state", "Karnataka").strip(),
+            data.get("district", "").strip(),
+            data.get("mandi_name", "").strip(),
+            data.get("variety", "").strip() if data.get("variety") else None,
+            float(data["min_price"]) if data.get("min_price") is not None and str(data["min_price"]).strip() != "" else None,
+            float(data["max_price"]) if data.get("max_price") is not None and str(data["max_price"]).strip() != "" else None,
+            float(data["modal_price"]),
+            float(data["arrival_quantity"]) if data.get("arrival_quantity") is not None and str(data["arrival_quantity"]).strip() != "" else None,
+            float(data["traded_quantity"]) if data.get("traded_quantity") is not None and str(data["traded_quantity"]).strip() != "" else None,
+            data.get("unit", "₹/quintal").strip(),
+            data.get("data_date", datetime.now().strftime("%Y-%m-%d")).strip(),
+            data.get("source_type", "farmer_entry").strip(),
+            data.get("notes", "").strip() if data.get("notes") else None,
+            now_iso
+        ))
+        conn.commit()
+        new_id = cursor.lastrowid
+        cursor.execute("SELECT * FROM local_mandi_observations WHERE id = ?", (new_id,))
+        row = cursor.fetchone()
+        return row_to_dict(row)
+    finally:
+        conn.close()
+
+
+def list_local_mandi_observations(
+    district: Optional[str] = None,
+    crop_name: Optional[str] = None,
+    limit: int = 50
+) -> List[Dict[str, Any]]:
+    """List recorded APMC mandi observations with optional district and crop filters."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        query = "SELECT * FROM local_mandi_observations"
+        conditions = []
+        params = []
+
+        if district and isinstance(district, str) and district.strip():
+            conditions.append("LOWER(district) = LOWER(?)")
+            params.append(district.strip())
+
+        if crop_name and isinstance(crop_name, str) and crop_name.strip():
+            conditions.append("(LOWER(crop_name) LIKE LOWER(?) OR LOWER(commodity) LIKE LOWER(?))")
+            term = f"%{crop_name.strip()}%"
+            params.extend([term, term])
+
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+
+        lim_val = int(limit) if isinstance(limit, (int, float)) else 50
+        query += " ORDER BY id DESC LIMIT ?"
+        params.append(lim_val)
+
+        cursor.execute(query, tuple(params))
+        rows = cursor.fetchall()
+        return [row_to_dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def delete_local_mandi_observation(observation_id: int) -> bool:
+    """Delete a local mandi observation by ID."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM local_mandi_observations WHERE id = ?", (observation_id,))
+        conn.commit()
+        return cursor.rowcount > 0
     finally:
         conn.close()

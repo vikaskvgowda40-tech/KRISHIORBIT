@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 from collections import defaultdict
 from typing import Optional, List, Dict, Any
@@ -16,8 +17,19 @@ from database import (
     list_crops,
     get_crop_by_id,
     get_crops_by_category,
+    add_local_mandi_observation,
+    list_local_mandi_observations,
+    delete_local_mandi_observation,
 )
 from rotation_engine import compare_rotation_scenarios
+from market_service import (
+    OFFICIAL_MARKET_PORTALS,
+    CACP_MSP_BENCHMARKS,
+    MARKET_ACTIVITY_PRINCIPLES,
+    fetch_agmarknet_live_data,
+    calculate_profit,
+    generate_crop_market_comparison,
+)
 
 # Ensure database tables exist upon module initialization (SQLite)
 init_db()
@@ -94,7 +106,14 @@ def root():
             "/api/crops",
             "/api/crops/{crop_id}",
             "/api/crops/category/{category}",
-            "/api/rotation/compare"
+            "/api/rotation/compare",
+            "/api/market/status",
+            "/api/market/prices",
+            "/api/market/msp-benchmarks",
+            "/api/market/activity-principles",
+            "/api/market/profit-calculator",
+            "/api/market/crop-comparison",
+            "/api/market/observations"
         ]
     }
 
@@ -1198,3 +1217,237 @@ def compare_crop_rotations_endpoint(request: RotationCompareRequest):
     )
 
     return result
+
+
+# ==============================================================================
+# PHASE 8: MARKET & PROFIT INTELLIGENCE ENDPOINTS
+# ==============================================================================
+
+class ProfitCalculationRequest(BaseModel):
+    crop_name: str = Field(default="Crop", description="Target crop name")
+    farm_area_acres: float = Field(..., gt=0, description="Cultivated land area in acres (must be > 0)")
+    expected_yield_quintals_per_acre: float = Field(..., ge=0, description="Anticipated yield per acre in quintals (>= 0)")
+    selling_price_per_quintal: float = Field(..., ge=0, description="Selling price per quintal in INR (>= 0)")
+    cultivation_cost_per_acre: float = Field(..., ge=0, description="Field cultivation cost per acre in INR (>= 0)")
+    transportation_marketing_cost_per_acre: float = Field(default=0.0, ge=0, description="Transport & marketing cost per acre in INR (>= 0)")
+
+
+class LocalMandiObservationCreate(BaseModel):
+    crop_name: str = Field(..., min_length=1, description="Crop name matching database catalog")
+    commodity: Optional[str] = Field(default=None, description="Specific trade commodity name")
+    state: str = Field(default="Karnataka", description="State")
+    district: str = Field(..., min_length=1, description="District name (e.g. Shivamogga)")
+    mandi_name: str = Field(..., min_length=1, description="APMC Mandi name (e.g. Shivamogga APMC)")
+    variety: Optional[str] = Field(default=None, description="Crop variety")
+    min_price: Optional[float] = Field(default=None, ge=0, description="Minimum auction price in ₹/quintal")
+    max_price: Optional[float] = Field(default=None, ge=0, description="Maximum auction price in ₹/quintal")
+    modal_price: float = Field(..., gt=0, description="Modal (most common) auction price in ₹/quintal")
+    arrival_quantity: Optional[float] = Field(default=None, ge=0, description="Daily arrival quantity in quintals")
+    traded_quantity: Optional[float] = Field(default=None, ge=0, description="Daily traded quantity in quintals")
+    unit: str = Field(default="₹/quintal", description="Price unit")
+    data_date: Optional[str] = Field(default=None, description="Observation date (YYYY-MM-DD)")
+    source_type: str = Field(default="farmer_entry", description="Source type")
+    notes: Optional[str] = Field(default=None, description="Additional farmer or APMC notes")
+
+
+@app.get(
+    "/api/market/status",
+    summary="Check status of official agricultural market data integrations"
+)
+def get_market_integration_status():
+    """
+    Check availability of external agricultural market feeds (data.gov.in AGMARKNET / e-NAM).
+    Exposes API connection state, official portals, and data policies without exposing secrets.
+    """
+    has_api_key = bool(os.getenv("DATAGOVIN_API_KEY") or os.getenv("AGMARKNET_API_KEY"))
+    return {
+        "status": "ready",
+        "api_key_configured": has_api_key,
+        "live_feed_provider": "data.gov.in AGMARKNET Daily Prices",
+        "official_portals": OFFICIAL_MARKET_PORTALS,
+        "integrity_notice": (
+            "KRISHIORBIT adheres strictly to scientific data integrity: When official live API feeds "
+            "are unavailable or credentials are unset, no synthetic market prices are generated. "
+            "Farmers are provided direct official portal links, statutory CACP MSP benchmarks, "
+            "and manual APMC entry capabilities."
+        )
+    }
+
+
+@app.get(
+    "/api/market/prices",
+    summary="Fetch AGMARKNET market prices, arrivals, and local mandi observations"
+)
+def get_market_prices(
+    state: str = Query(default="Karnataka", description="Target state"),
+    district: Optional[str] = Query(default="Shivamogga", description="Target district"),
+    commodity: Optional[str] = Query(default=None, description="Target commodity or crop name"),
+    limit: int = Query(default=50, ge=1, le=200, description="Maximum records to return")
+):
+    """
+    Retrieve agricultural market price intelligence for the selected state and district.
+    Integrates:
+      1. Official AGMARKNET live feed from data.gov.in (if DATAGOVIN_API_KEY is configured)
+      2. Local verified APMC observations recorded in the KRISHIORBIT database
+      3. Authoritative CACP Statutory Minimum Support Price (MSP) benchmarks
+    """
+    state_val = state if isinstance(state, str) else "Karnataka"
+    dist_val = district if isinstance(district, str) else None
+    comm_val = commodity if isinstance(commodity, str) else None
+    lim_val = limit if isinstance(limit, int) else 50
+
+    # 1. Fetch live AGMARKNET feed or honest fallback
+    market_feed = fetch_agmarknet_live_data(
+        state=state_val,
+        district=dist_val,
+        commodity=comm_val,
+        limit=lim_val
+    )
+
+    # 2. Retrieve local verified observations from SQLite database
+    local_records = list_local_mandi_observations(
+        district=dist_val,
+        crop_name=comm_val,
+        limit=lim_val
+    )
+
+    # Attach local observations and district context
+    market_feed["local_observations"] = local_records
+    market_feed["query_context"] = {
+        "state": state_val,
+        "district": dist_val,
+        "commodity": comm_val
+    }
+
+    return market_feed
+
+
+@app.get(
+    "/api/market/msp-benchmarks",
+    summary="Get official Government of India CACP MSP benchmarks (Kharif 2026–27)"
+)
+def get_msp_benchmarks():
+    """
+    Return authoritative statutory Minimum Support Prices (MSP) approved by the
+    Cabinet Committee on Economic Affairs (CCEA) / CACP for Kharif Marketing Season 2026–27.
+    """
+    return {
+        "status": "success",
+        "marketing_year": "Kharif Marketing Season 2026–27",
+        "notifying_body": "Commission for Agricultural Costs & Prices (CACP), Department of Agriculture & Farmers Welfare, Ministry of Agriculture & Farmers Welfare, Government of India",
+        "benchmarks": list(CACP_MSP_BENCHMARKS.values()),
+        "official_source_url": "https://cacp.dacnet.nic.in"
+    }
+
+
+@app.get(
+    "/api/market/activity-principles",
+    summary="Educational guidance on market arrivals, traded volume, and demand signals"
+)
+def get_market_activity_principles():
+    """
+    Return verified principles for understanding market activity, arrivals vs demand,
+    and traded volume dynamics.
+    """
+    return MARKET_ACTIVITY_PRINCIPLES
+
+
+@app.post(
+    "/api/market/profit-calculator",
+    summary="Deterministically calculate farm revenue, costs, net profit, and break-even price"
+)
+def calculate_farm_profit_endpoint(request: ProfitCalculationRequest):
+    """
+    Compute estimated farm gross revenue, total operational costs, net profit,
+    profit per acre, and break-even selling price based on farmer operational inputs.
+    """
+    try:
+        result = calculate_profit(
+            farm_area_acres=request.farm_area_acres,
+            expected_yield_quintals_per_acre=request.expected_yield_quintals_per_acre,
+            selling_price_per_quintal=request.selling_price_per_quintal,
+            cultivation_cost_per_acre=request.cultivation_cost_per_acre,
+            transportation_marketing_cost_per_acre=request.transportation_marketing_cost_per_acre,
+            crop_name=request.crop_name
+        )
+        return result
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc)
+        )
+
+
+@app.get(
+    "/api/market/crop-comparison",
+    summary="Balanced comparison between agro-climatic feasibility and market indicators"
+)
+def get_crop_market_comparison_endpoint():
+    """
+    Return a balanced comparison of all catalog crops in KRISHIORBIT.
+    Presents Agro-Climatic Suitability and Economic Market Indicators separately
+    to prevent risky price-only crop selection.
+    """
+    all_crops = list_crops()
+    return generate_crop_market_comparison(all_crops)
+
+
+@app.post(
+    "/api/market/observations",
+    status_code=status.HTTP_201_CREATED,
+    summary="Record a verified local APMC mandi price observation"
+)
+def record_local_mandi_observation(entry: LocalMandiObservationCreate):
+    """
+    Record a farmer-reported or locally observed APMC mandi auction price.
+    Persists to SQLite database for district-level reference and profit planning.
+    """
+    saved = add_local_mandi_observation(entry.model_dump())
+    return {
+        "status": "success",
+        "message": f"Recorded local mandi price for {entry.crop_name} at {entry.mandi_name}.",
+        "observation": saved
+    }
+
+
+@app.get(
+    "/api/market/observations",
+    summary="List recorded local APMC mandi observations"
+)
+def get_local_mandi_observations(
+    district: Optional[str] = Query(default=None, description="Filter by district"),
+    crop_name: Optional[str] = Query(default=None, description="Filter by crop name"),
+    limit: int = Query(default=50, ge=1, le=200, description="Limit results")
+):
+    """
+    List local APMC observations saved in the KRISHIORBIT database.
+    """
+    dist_val = district if isinstance(district, str) else None
+    crop_val = crop_name if isinstance(crop_name, str) else None
+    lim_val = limit if isinstance(limit, int) else 50
+    records = list_local_mandi_observations(district=dist_val, crop_name=crop_val, limit=lim_val)
+    return {
+        "status": "success",
+        "total_records": len(records),
+        "records": records
+    }
+
+
+@app.delete(
+    "/api/market/observations/{observation_id}",
+    summary="Delete a recorded local APMC observation"
+)
+def remove_local_mandi_observation(observation_id: int):
+    """
+    Delete a saved local mandi observation by primary key ID.
+    """
+    success = delete_local_mandi_observation(observation_id)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Local mandi observation with ID {observation_id} was not found."
+        )
+    return {
+        "status": "success",
+        "message": f"Successfully deleted local mandi observation ID {observation_id}."
+    }

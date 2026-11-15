@@ -5,7 +5,7 @@ import {
   MonthlyDataTable,
 } from './NasaWeatherCharts';
 
-export default function Dashboard({ backendHealth, onOpenCrops, onOpenFarmProfile, onOpenRotation }) {
+export default function Dashboard({ backendHealth, onOpenCrops, onOpenFarmProfile, onOpenRotation, onOpenMarket }) {
   const [nasaData, setNasaData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -357,6 +357,11 @@ export default function Dashboard({ backendHealth, onOpenCrops, onOpenFarmProfil
           {onOpenRotation && (
             <button className="btn-secondary" onClick={onOpenRotation}>
               Rotation Simulator
+            </button>
+          )}
+          {onOpenMarket && (
+            <button className="btn-secondary" onClick={onOpenMarket}>
+              Market Intelligence
             </button>
           )}
         </div>
