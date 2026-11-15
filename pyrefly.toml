@@ -1,0 +1,11 @@
+# Pyrefly configuration for KRISHIORBIT
+python-interpreter-path = "C:/Users/K V VIKAS/AppData/Local/Programs/Python/Python311/python.exe"
+python-platform = "win32"
+python-version = "3.11"
+site-package-path = [
+  "C:/Users/K V VIKAS/AppData/Local/Programs/Python/Python311/Lib/site-packages"
+]
+search-path = [
+  ".",
+  "backend"
+]

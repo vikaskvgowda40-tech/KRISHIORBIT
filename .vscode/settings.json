@@ -1,0 +1,15 @@
+{
+  "python.defaultInterpreterPath": "C:\\Users\\K V VIKAS\\AppData\\Local\\Programs\\Python\\Python311\\python.exe",
+  "python.pythonPath": "C:\\Users\\K V VIKAS\\AppData\\Local\\Programs\\Python\\Python311\\python.exe",
+  "pyrefly.pythonPath": "C:\\Users\\K V VIKAS\\AppData\\Local\\Programs\\Python\\Python311\\python.exe",
+  "pyrefly.pythonInterpreterPath": "C:\\Users\\K V VIKAS\\AppData\\Local\\Programs\\Python\\Python311\\python.exe",
+  "pyright.pythonPath": "C:\\Users\\K V VIKAS\\AppData\\Local\\Programs\\Python\\Python311\\python.exe",
+  "python.analysis.extraPaths": [
+    "C:\\Users\\K V VIKAS\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\site-packages",
+    "${workspaceFolder}/backend"
+  ],
+  "pyrefly.analysis.extraPaths": [
+    "C:\\Users\\K V VIKAS\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\site-packages",
+    "${workspaceFolder}/backend"
+  ]
+}

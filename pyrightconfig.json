@@ -1,0 +1,11 @@
+{
+  "pythonPlatform": "Windows",
+  "pythonVersion": "3.11",
+  "pythonPath": "C:\\Users\\K V VIKAS\\AppData\\Local\\Programs\\Python\\Python311\\python.exe",
+  "venvPath": "C:\\Users\\K V VIKAS\\AppData\\Local\\Programs\\Python",
+  "venv": "Python311",
+  "extraPaths": [
+    "C:\\Users\\K V VIKAS\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\site-packages",
+    "backend"
+  ]
+}
