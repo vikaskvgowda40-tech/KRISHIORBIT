@@ -795,7 +795,15 @@ export default function CropRotationSimulator({ onOpenFarmProfile, onOpenCrops }
           {/* Cards Comparison Grid */}
           <div className="scenarios-comparison-grid">
             {comparisonResult.scenarios.map((sc, sIdx) => {
-              const hScore = sc.heuristic_score;
+              const qual = sc.qualitative_suitability || {};
+              const category = qual.category || sc.suitability_category || 'Moderate';
+              const categoryBadgeClass = {
+                Optimal: 'st-optimal',
+                Moderate: 'st-moderate',
+                Challenging: 'st-challenging',
+                'Insufficient data': 'st-insufficient'
+              }[category] || 'st-moderate';
+
               return (
                 <div key={sIdx} className="scenario-card">
                   {/* Scenario Header */}
@@ -803,40 +811,66 @@ export default function CropRotationSimulator({ onOpenFarmProfile, onOpenCrops }
                     <div className="sc-badge-rank" style={{ background: '#f1f5f9', color: '#334155', border: '1px solid #cbd5e1' }}>
                       Option {String.fromCharCode(65 + sIdx)}
                     </div>
-                    <span className="status-pill pill-moderate" style={{ background: '#f8fafc', color: '#475569', borderColor: '#cbd5e1' }}>
-                      Biophysical Criteria Evaluation
+                    <span className={`factor-status-badge ${categoryBadgeClass}`}>
+                      {category} Suitability
                     </span>
                   </div>
 
                   <h3 className="sc-card-name">{sc.name}</h3>
                   <div className="sc-flow-display">{sc.crop_sequence_display}</div>
 
-                  {/* Biophysical Qualitative Summary & Unvalidated Heuristic Indicator */}
-                  <div className="heuristic-score-meter" style={{ background: '#f8fafc', border: '1px solid #e2e8f0', padding: '12px', borderRadius: '8px' }}>
+                  {/* Qualitative Suitability Summary & Limiting Factor Alignment */}
+                  <div className="qualitative-suitability-box" style={{ background: '#f8fafc', border: '1px solid #e2e8f0', padding: '14px', borderRadius: '8px', marginBottom: '14px' }}>
                     <div className="score-num-row" style={{ marginBottom: '6px' }}>
-                      <span className="score-title" style={{ fontWeight: 600, color: '#1e293b' }}>Biophysical Criteria Alignment</span>
+                      <span className="score-title" style={{ fontWeight: 700, color: '#1e293b' }}>
+                        Biophysical Criteria Alignment
+                      </span>
                       <span style={{ fontSize: '0.75rem', background: '#e2e8f0', color: '#475569', padding: '2px 8px', borderRadius: '4px', fontWeight: 500 }}>
-                        Unvalidated Heuristic Index
+                        Qualitative Categorical Assessment
                       </span>
                     </div>
-                    <p style={{ fontSize: '0.78rem', color: '#64748b', margin: '4px 0 10px 0', lineHeight: 1.4 }}>
-                      <em>{hScore.disclaimer || 'Experimental unvalidated heuristic index based on published ICAR / UAS agronomic boundaries and NASA POWER environmental estimates. Not a validated empirical score, crop yield prediction, or economic profitability forecast.'}</em>
+
+                    <p style={{ fontSize: '0.82rem', color: '#334155', margin: '4px 0 8px 0', lineHeight: 1.45 }}>
+                      <strong>Assessment:</strong> {qual.explanation || 'Evaluated across biophysical limiting factors.'}
                     </p>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(105px, 1fr))', gap: '6px', fontSize: '0.78rem' }}>
+
+                    {qual.supporting_factors && qual.supporting_factors.length > 0 && (
+                      <div style={{ marginBottom: '6px', fontSize: '0.78rem' }}>
+                        <strong style={{ color: '#047857' }}>✓ Supporting Alignments:</strong>
+                        <ul style={{ margin: '2px 0 0 16px', padding: 0, color: '#334155' }}>
+                          {qual.supporting_factors.map((sf, idx) => (
+                            <li key={idx} style={{ marginBottom: '2px' }}>{sf}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {qual.limiting_factors && qual.limiting_factors.length > 0 && (
+                      <div style={{ marginBottom: '8px', fontSize: '0.78rem' }}>
+                        <strong style={{ color: '#be123c' }}>⚠ Management / Limiting Factors:</strong>
+                        <ul style={{ margin: '2px 0 0 16px', padding: 0, color: '#334155' }}>
+                          {qual.limiting_factors.map((lf, idx) => (
+                            <li key={idx} style={{ marginBottom: '2px' }}>{lf}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: '6px', fontSize: '0.78rem', marginTop: '10px' }}>
                       <div style={{ background: '#ffffff', padding: '6px 8px', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
-                        🌱 <strong>Soil:</strong> {sc.soil_compatibility.overall_status}
+                        🌱 <strong>Soil:</strong> {sc.soil_compatibility?.overall_status || 'N/A'}
                       </div>
                       <div style={{ background: '#ffffff', padding: '6px 8px', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
-                        🌧️ <strong>Water:</strong> {sc.climate_compatibility.water_status}
+                        🌧️ <strong>Water:</strong> {sc.climate_compatibility?.water_status || 'N/A'}
                       </div>
                       <div style={{ background: '#ffffff', padding: '6px 8px', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
-                        🔄 <strong>Rotation:</strong> {sc.rotation_dynamics.status}
+                        🔄 <strong>Rotation:</strong> {sc.rotation_dynamics?.status || 'N/A'}
                       </div>
                       <div style={{ background: '#ffffff', padding: '6px 8px', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
-                        🌡️ <strong>Thermal:</strong> {sc.climate_compatibility.thermal_status}
+                        🌡️ <strong>Thermal:</strong> {sc.climate_compatibility?.thermal_status || 'N/A'}
                       </div>
                       <div style={{ background: '#ffffff', padding: '6px 8px', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
-                        ⏱️ <strong>Calendar:</strong> {sc.calendar_and_season.status}
+                        ⏱️ <strong>Calendar:</strong> {sc.calendar_and_season?.status || 'N/A'}
                       </div>
                     </div>
                   </div>
@@ -845,7 +879,12 @@ export default function CropRotationSimulator({ onOpenFarmProfile, onOpenCrops }
                   <div className="sc-factor-box">
                     <div className="factor-header">
                       <span className="factor-name">🌱 Soil Compatibility</span>
-                      <span className={`factor-status-badge ${sc.soil_compatibility.overall_status === 'Optimal' ? 'st-optimal' : 'st-moderate'}`}>
+                      <span className={`factor-status-badge ${{
+                        Optimal: 'st-optimal',
+                        Moderate: 'st-moderate',
+                        Challenging: 'st-challenging',
+                        'Insufficient data': 'st-insufficient'
+                      }[sc.soil_compatibility.overall_status] || 'st-moderate'}`}>
                         {sc.soil_compatibility.overall_status}
                       </span>
                     </div>
@@ -860,7 +899,12 @@ export default function CropRotationSimulator({ onOpenFarmProfile, onOpenCrops }
                   <div className="sc-factor-box">
                     <div className="factor-header">
                       <span className="factor-name">🌧️ Water & Seasonal Climate Alignment</span>
-                      <span className={`factor-status-badge ${sc.climate_compatibility.water_status === 'Optimal' ? 'st-optimal' : 'st-moderate'}`}>
+                      <span className={`factor-status-badge ${{
+                        Optimal: 'st-optimal',
+                        Moderate: 'st-moderate',
+                        Challenging: 'st-challenging',
+                        'Insufficient data': 'st-insufficient'
+                      }[sc.climate_compatibility.water_status] || 'st-moderate'}`}>
                         {sc.climate_compatibility.water_status}
                       </span>
                     </div>
@@ -869,7 +913,7 @@ export default function CropRotationSimulator({ onOpenFarmProfile, onOpenCrops }
                         <div className="crop-season-header-row">
                           <span className="season-window-pill">
                             🗓️ {ce.seasonal_window || ce.assigned_season || 'Seasonal Window'}:{' '}
-                            <strong>{ce.seasonal_rainfall_mm != null ? `${ce.seasonal_rainfall_mm} mm` : 'N/A'}</strong>
+                            <strong>{ce.seasonal_rainfall_mm != null ? `${ce.seasonal_rainfall_mm} mm` : 'Unavailable (No synthetic allocation)'}</strong>
                           </span>
                           <span className="factor-eval-type-tag">
                             {ce.assigned_season === 'Perennial' ? 'Annual Full-Year' : 'Active Seasonal Window'}
@@ -889,10 +933,25 @@ export default function CropRotationSimulator({ onOpenFarmProfile, onOpenCrops }
                           )}
                           {ce.residual_moisture_dependency && (
                             <span className="moisture-warning-pill">
-                              ⚠️ Low Rain ({ce.seasonal_rainfall_mm} mm) — Dependent on Residual Soil Moisture
+                              ⚠️ Low Rain ({ce.seasonal_rainfall_mm != null ? `${ce.seasonal_rainfall_mm} mm` : 'Deficit'}) — Dependent on Residual Soil Moisture
                             </span>
                           )}
                         </div>
+
+                        {ce.climatology_reference && (
+                          <div style={{ marginTop: '6px', fontSize: '0.78rem', color: '#0369a1', background: '#f0f9ff', padding: '6px 10px', borderRadius: '4px', border: '1px solid #bae6fd' }}>
+                            📅 <strong>30-Year Climatological Context (1991–2020 Normal):</strong> ~{ce.climatology_reference.seasonal_rainfall_normal_mm} mm ({ce.climatology_reference.months_included?.join(', ')}).
+                            <span style={{ display: 'block', fontSize: '0.73rem', color: '#64748b', marginTop: '2px' }}>
+                              {ce.climatology_reference.note}
+                            </span>
+                          </div>
+                        )}
+
+                        {ce.data_provenance && (
+                          <div style={{ fontSize: '0.73rem', color: '#64748b', marginTop: '4px' }}>
+                            Data Provenance: <em>{ce.data_provenance}</em>
+                          </div>
+                        )}
 
                         {ce.is_partial_data && ce.data_completeness_note && (
                           <div className="partial-data-note">

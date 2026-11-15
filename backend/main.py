@@ -1103,44 +1103,89 @@ def compare_crop_rotations_endpoint(request: RotationCompareRequest):
                 )
 
     # Fetch NASA POWER climate data for this farm's exact coordinates
-    farm_lat = float(farm.get("latitude") or 13.9299)
-    farm_lon = float(farm.get("longitude") or 75.5681)
+    raw_lat = farm.get("latitude")
+    raw_lon = farm.get("longitude")
+
+    if raw_lat is None or raw_lon is None or str(raw_lat).strip() == "" or str(raw_lon).strip() == "":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Farm profile '{farm.get('farm_name', 'Selected Farm')}' (ID: {request.farm_profile_id}) "
+                "is missing geographic coordinates (latitude and longitude). "
+                "Valid geographic coordinates are required to query location-specific NASA POWER satellite meteorological "
+                "observations and historical climatology. Please update the farm profile with valid latitude and longitude."
+            )
+        )
 
     try:
+        farm_lat = float(raw_lat)
+        farm_lon = float(raw_lon)
+    except (ValueError, TypeError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Farm profile '{farm.get('farm_name', 'Selected Farm')}' has invalid coordinate values: "
+                f"latitude={raw_lat}, longitude={raw_lon}. Valid numeric decimal coordinates are required."
+            )
+        )
+
+    if not (-90.0 <= farm_lat <= 90.0) or not (-180.0 <= farm_lon <= 180.0):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Farm profile '{farm.get('farm_name', 'Selected Farm')}' has coordinates out of valid bounds: "
+                f"latitude={farm_lat}, longitude={farm_lon}. Latitude must be between -90 and 90, and longitude between -180 and 180."
+            )
+        )
+
+    # 1. Attempt location-matched daily telemetry
+    climate_res = None
+    telemetry_err = None
+    try:
         climate_res = get_nasa_power_data(latitude=farm_lat, longitude=farm_lon)
+    except Exception as e:
+        telemetry_err = str(e)
+
+    # 2. Attempt location-matched 30-year climatology baseline (1991–2020) for seasonal context
+    climatology_res = None
+    try:
+        climatology_res = get_nasa_power_climatology(latitude=farm_lat, longitude=farm_lon)
     except Exception:
-        # Fallback with graceful notice if NASA POWER API experiences network latency
-        climate_res = {
-            "status": "partial",
-            "metadata": {
-                "data_source": "NASA Prediction Of Worldwide Energy Resources (POWER)",
-                "assimilation_model": "MERRA2 / GEOSIT",
-                "actual_first_observation": "2026-01-01",
-                "actual_last_observation": "2026-11-11",
-                "total_observations": 315
-            },
-            "annual_summary": {
-                "avg_temperature_c": 25.24,
-                "max_temperature_recorded_c": 39.73,
-                "min_temperature_recorded_c": 13.08,
-                "total_precipitation_mm": 903.22,
-                "avg_relative_humidity_pct": 70.43,
-                "total_days_evaluated": 315
-            },
-            "monthly_summary": [
-                {"month": "2026-01", "month_name": "January", "total_precipitation_mm": 0.69, "avg_temperature_c": 22.31, "avg_max_temperature_c": 31.45, "avg_min_temperature_c": 13.08, "avg_relative_humidity_pct": 52.4, "days_recorded": 31},
-                {"month": "2026-02", "month_name": "February", "total_precipitation_mm": 0.89, "avg_temperature_c": 24.51, "avg_max_temperature_c": 34.22, "avg_min_temperature_c": 14.80, "avg_relative_humidity_pct": 48.6, "days_recorded": 28},
-                {"month": "2026-03", "month_name": "March", "total_precipitation_mm": 46.45, "avg_temperature_c": 27.05, "avg_max_temperature_c": 37.10, "avg_min_temperature_c": 18.25, "avg_relative_humidity_pct": 55.1, "days_recorded": 31},
-                {"month": "2026-04", "month_name": "April", "total_precipitation_mm": 29.79, "avg_temperature_c": 28.71, "avg_max_temperature_c": 39.73, "avg_min_temperature_c": 21.14, "avg_relative_humidity_pct": 61.8, "days_recorded": 30},
-                {"month": "2026-05", "month_name": "May", "total_precipitation_mm": 101.39, "avg_temperature_c": 27.70, "avg_max_temperature_c": 36.40, "avg_min_temperature_c": 21.65, "avg_relative_humidity_pct": 74.2, "days_recorded": 31},
-                {"month": "2026-06", "month_name": "June", "total_precipitation_mm": 160.39, "avg_temperature_c": 24.98, "avg_max_temperature_c": 30.12, "avg_min_temperature_c": 20.89, "avg_relative_humidity_pct": 84.1, "days_recorded": 30},
-                {"month": "2026-07", "month_name": "July", "total_precipitation_mm": 202.09, "avg_temperature_c": 24.48, "avg_max_temperature_c": 28.85, "avg_min_temperature_c": 20.91, "avg_relative_humidity_pct": 88.5, "days_recorded": 31},
-                {"month": "2026-08", "month_name": "August", "total_precipitation_mm": 163.47, "avg_temperature_c": 24.21, "avg_max_temperature_c": 28.45, "avg_min_temperature_c": 20.72, "avg_relative_humidity_pct": 89.2, "days_recorded": 31},
-                {"month": "2026-09", "month_name": "September", "total_precipitation_mm": 87.41, "avg_temperature_c": 24.90, "avg_max_temperature_c": 30.15, "avg_min_temperature_c": 20.45, "avg_relative_humidity_pct": 83.7, "days_recorded": 30},
-                {"month": "2026-10", "month_name": "October", "total_precipitation_mm": 87.01, "avg_temperature_c": 24.18, "avg_max_temperature_c": 30.82, "avg_min_temperature_c": 19.82, "avg_relative_humidity_pct": 78.9, "days_recorded": 31},
-                {"month": "2026-11", "month_name": "November", "total_precipitation_mm": 23.64, "avg_temperature_c": 23.66, "avg_max_temperature_c": 30.20, "avg_min_temperature_c": 17.50, "avg_relative_humidity_pct": 68.2, "days_recorded": 11}
-            ]
-        }
+        pass
+
+    # 3. Handle fallback safely without silent wrong-location substitution
+    if not climate_res:
+        if climatology_res:
+            # Use location-matched climatology for this farm's exact coordinates
+            climate_res = {
+                "status": "climatology_fallback",
+                "data_provenance": "historical_climatology_baseline",
+                "is_climatology_fallback": True,
+                "coordinates_evaluated": {"latitude": farm_lat, "longitude": farm_lon},
+                "metadata": {
+                    "data_source": "NASA POWER 30-Year Climatology Baseline (1991–2020)",
+                    "assimilation_model": "MERRA-2 / NOAA CPC Gauge Analysis",
+                    "baseline_period": "1991–2020",
+                    "fallback_notice": (
+                        f"Live daily satellite observations were unreachable ({telemetry_err}). "
+                        f"Location-matched 30-year historical climatological baseline (1991–2020) for Lat {farm_lat}°N, Lon {farm_lon}°E "
+                        "is utilized for seasonal rotation analysis."
+                    )
+                },
+                "annual_summary": climatology_res.get("annual_summary", {}),
+                "monthly_summary": climatology_res.get("monthly_summary", [])
+            }
+        else:
+            # Both live telemetry and climatology failed for this coordinate
+            # NEVER substitute hardcoded data from another location!
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=(
+                    f"Unable to retrieve NASA POWER climate data for farm coordinates (Lat {farm_lat}, Lon {farm_lon}). "
+                    f"Live daily telemetry failed ({telemetry_err}) and location-matched 30-year climatology was unreachable. "
+                    "Cannot evaluate crop rotation without location-matched meteorological data."
+                )
+            )
 
     scenarios_input = [{"name": s.name, "crop_ids": s.crop_ids} for s in request.scenarios]
 
@@ -1148,7 +1193,8 @@ def compare_crop_rotations_endpoint(request: RotationCompareRequest):
         farm=farm,
         climate_data=climate_res,
         scenarios_input=scenarios_input,
-        crops_catalog=crops_catalog
+        crops_catalog=crops_catalog,
+        climatology_context=climatology_res
     )
 
     return result

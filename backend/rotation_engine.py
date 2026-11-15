@@ -18,8 +18,29 @@ Provides transparent scientific disclosures, assumptions, uncertainties, and heu
 Does NOT fabricate yields, profits, fertilizer savings, or guaranteed nitrogen credits.
 """
 
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 import re
+
+
+def is_paddy_crop(crop_or_name: Any) -> bool:
+    """
+    Check if a crop dictionary, crop name, or botanical name represents Paddy / Rice.
+    Normalizes and matches:
+      - 'Paddy'
+      - 'Paddy (Rice)'
+      - 'Rice'
+      - 'Oryza sativa'
+      - any variant containing 'paddy', 'rice', or 'oryza'
+    """
+    if isinstance(crop_or_name, dict):
+        text = f"{crop_or_name.get('crop_name', '')} {crop_or_name.get('scientific_name', '')}".lower()
+    else:
+        text = str(crop_or_name or "").lower()
+    clean = re.sub(r"[^\w\s]", " ", text)
+    tokens = set(clean.split())
+    if tokens.intersection({"paddy", "rice", "oryza"}):
+        return True
+    return any(p in text for p in ["paddy", "rice", "oryza sativa", "oryza"])
 
 
 def _parse_duration_days(duration_str: str) -> int:
@@ -46,14 +67,53 @@ def _parse_water_bounds_mm(water_str: str) -> tuple[float, float]:
     return (400.0, 700.0)
 
 
-def evaluate_soil_compatibility(farm_soil: str, crop: Dict[str, Any]) -> Dict[str, Any]:
+def evaluate_soil_compatibility(farm_soil: Optional[str], crop: Dict[str, Any]) -> Dict[str, Any]:
     """
     Evaluate crop suitability against farm soil type based on ICAR/UAS package of practices.
-    Returns status ('Optimal', 'Moderate', 'Challenging'), points (0-25), and detailed rationale.
+    Returns status ('Optimal', 'Moderate', 'Challenging', 'Insufficient data'), points (0-25), and detailed rationale.
+    If soil_type is missing, null, blank, or unknown, returns 'Insufficient data' and 0 points.
     """
-    farm_soil_clean = (farm_soil or "Other / Unknown").strip().lower()
     crop_soils = (crop.get("suitable_soils") or "").lower()
     crop_name = crop.get("crop_name", "")
+
+    # Strictly identify missing, null, blank, or unknown soil types
+    if farm_soil is None:
+        return {
+            "status": "Insufficient data",
+            "score": 0,
+            "max_score": 25,
+            "farm_soil": "Missing / Unspecified",
+            "suitable_soils_reference": crop.get("suitable_soils", "Not specified"),
+            "rationale": (
+                f"Soil classification is missing or unknown for {crop_name}. "
+                "A laboratory soil test or verified regional soil classification (texture, drainage, pH) "
+                "is required to evaluate agronomic compatibility and prevent crop-soil mismatch."
+            )
+        }
+
+    soil_str = farm_soil.strip().lower()
+    is_unknown = (
+        not soil_str
+        or soil_str in ["none", "null", "undefined"]
+        or "unknown" in soil_str
+        or soil_str in ["other", "other / unknown", "not specified", "unspecified"]
+    )
+
+    if is_unknown:
+        return {
+            "status": "Insufficient data",
+            "score": 0,
+            "max_score": 25,
+            "farm_soil": farm_soil.strip() if farm_soil.strip() else "Missing / Unspecified",
+            "suitable_soils_reference": crop.get("suitable_soils", "Not specified"),
+            "rationale": (
+                f"Soil classification is missing or unknown for {crop_name}. "
+                "A laboratory soil test or verified regional soil classification (texture, drainage, pH) "
+                "is required to evaluate agronomic compatibility and prevent crop-soil mismatch."
+            )
+        }
+
+    farm_soil_clean = soil_str
 
     # Specific agronomic knowledge matching
     score = 16
@@ -130,7 +190,7 @@ def evaluate_soil_compatibility(farm_soil: str, crop: Dict[str, Any]) -> Dict[st
             score = 23
             status = "Optimal"
             rationale = f"Light textured sandy loam offers low mechanical impedance for {crop_name} root systems."
-        elif "paddy" in crop_name.lower():
+        elif is_paddy_crop(crop_name):
             score = 12
             status = "Challenging"
             rationale = (
@@ -165,6 +225,7 @@ SEASON_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "display_name": "Kharif (Monsoon)",
         "window_description": "June to October (South-West Monsoon)",
         "months": ["06", "07", "08", "09", "10"],
+        "month_numbers": [6, 7, 8, 9, 10],
         "month_names": ["June", "July", "August", "September", "October"],
         "source": "UAS Bengaluru & ICAR Package of Practices for Karnataka",
         "characteristics": "High precipitation period delivering 70–85% of annual rainfall; primary cropping window for cereals and kharif pulses."
@@ -173,6 +234,7 @@ SEASON_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "display_name": "Rabi (Post-Monsoon / Winter)",
         "window_description": "November to February (Post-Monsoon / Dry Winter)",
         "months": ["11", "12", "01", "02"],
+        "month_numbers": [11, 12, 1, 2],
         "month_names": ["November", "December", "January", "February"],
         "source": "UAS Bengaluru & ICAR-IIPR (Rice-Fallow Pulses Protocol)",
         "characteristics": "Low in-season precipitation; rainfed cropping relies heavily on residual subsoil moisture from the preceding Kharif or supplemental irrigation."
@@ -181,6 +243,7 @@ SEASON_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "display_name": "Summer (Pre-Monsoon / Dry)",
         "window_description": "March to May (Pre-Monsoon Dry Season)",
         "months": ["03", "04", "05"],
+        "month_numbers": [3, 4, 5],
         "month_names": ["March", "April", "May"],
         "source": "UAS Bengaluru Department of Agronomy",
         "characteristics": "High evaporative demand and temperatures; negligible reliable rain; unviable for rainfed field crops without assured irrigation."
@@ -189,11 +252,65 @@ SEASON_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "display_name": "Perennial (Full Year)",
         "window_description": "January to December (Year-Round)",
         "months": ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"],
+        "month_numbers": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
         "month_names": ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"],
         "source": "ICAR - CPCRI Kasaragod & UAHS Shivamogga",
         "characteristics": "Multi-year commercial palm system requiring continuous year-round water management and dry season protective irrigation."
     }
 }
+
+MONTH_NAME_TO_NUM = {
+    "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6,
+    "july": 7, "august": 8, "september": 9, "october": 10, "november": 11, "december": 12
+}
+
+MONTH_ABBR_TO_NUM = {
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12
+}
+
+NUM_TO_MONTH_NAME = {
+    1: "January", 2: "February", 3: "March", 4: "April", 5: "May", 6: "June",
+    7: "July", 8: "August", 9: "September", 10: "October", 11: "November", 12: "December"
+}
+
+
+def normalize_month_record(m: Dict[str, Any]) -> Tuple[Optional[int], Optional[str]]:
+    """
+    Extract (month_number, month_name) from either daily or climatology monthly records.
+    Returns (1..12, 'January'..'December') or (None, None).
+    """
+    m_num = m.get("month_number") or m.get("month_index")
+    if isinstance(m_num, int) and 1 <= m_num <= 12:
+        return m_num, NUM_TO_MONTH_NAME[m_num]
+
+    m_name = str(m.get("month_name") or "").strip().lower()
+    if m_name in MONTH_NAME_TO_NUM:
+        num = MONTH_NAME_TO_NUM[m_name]
+        return num, NUM_TO_MONTH_NAME[num]
+
+    m_str = str(m.get("month") or "").strip().lower()
+    if "-" in m_str:
+        parts = m_str.split("-")
+        if len(parts) >= 2:
+            try:
+                num = int(parts[1])
+                if 1 <= num <= 12:
+                    return num, NUM_TO_MONTH_NAME[num]
+            except ValueError:
+                pass
+    elif len(m_str) == 6 and m_str.isdigit():
+        try:
+            num = int(m_str[4:6])
+            if 1 <= num <= 12:
+                return num, NUM_TO_MONTH_NAME[num]
+        except ValueError:
+            pass
+    elif m_str in MONTH_ABBR_TO_NUM:
+        num = MONTH_ABBR_TO_NUM[m_str]
+        return num, NUM_TO_MONTH_NAME[num]
+
+    return None, None
 
 
 def assign_crop_seasons(
@@ -229,19 +346,42 @@ def assign_crop_seasons(
 
 def _extract_seasonal_climate(
     climate: Dict[str, Any],
-    assigned_season: str
+    assigned_season: str,
+    climatology_context: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """
     Extract NASA POWER monthly precipitation and thermal observations matching the active seasonal window.
-    Detects complete vs partial records and accounts for trailing observation latency.
+    Differentiates between recent daily observations and 1991–2020 climatology normals.
+    Ensures November and December are not omitted from Rabi analysis.
+    Eliminates all uncalibrated proportional rainfall allocations (75%, 8%, 17%).
     """
     season_key = assigned_season if assigned_season in SEASON_DEFINITIONS else "Kharif"
     s_def = SEASON_DEFINITIONS[season_key]
-    target_months: List[str] = s_def["months"]
+    target_month_numbers: List[int] = s_def["month_numbers"]
     target_month_names: List[str] = s_def["month_names"]
 
     monthly_summary: List[Dict[str, Any]] = climate.get("monthly_summary", [])
     annual_summary: Dict[str, Any] = climate.get("annual_summary", {})
+
+    # Detect whether the primary climate dataset is climatology or daily telemetry
+    is_climatology = bool(
+        climate.get("climatology_label")
+        or climate.get("metadata", {}).get("baseline_range")
+        or climate.get("data_provenance") == "historical_climatology_baseline"
+        or "climatology" in str(climate.get("metadata", {}).get("data_source", "")).lower()
+        or "climatology" in str(climate.get("metadata", {}).get("title", "")).lower()
+    )
+    is_climatology_fallback = bool(climate.get("is_climatology_fallback", False))
+
+    if is_climatology_fallback:
+        provenance_label = "Location-Matched Climatological Fallback (1991–2020 Baseline)"
+        data_type = "climatology_fallback"
+    elif is_climatology:
+        provenance_label = "NASA POWER Historical Climatological Baseline (1991–2020)"
+        data_type = "climatology"
+    else:
+        provenance_label = "NASA POWER Recent Daily Observations"
+        data_type = "daily_observed"
 
     seasonal_precip = 0.0
     matched_t2m: List[float] = []
@@ -249,92 +389,66 @@ def _extract_seasonal_climate(
     matched_t2m_min: List[float] = []
     months_found: List[str] = []
     days_recorded_total = 0
+    records_matched_count = 0
 
     if monthly_summary:
         for m in monthly_summary:
-            m_code = ""
-            m_str = str(m.get("month", ""))
-            if "-" in m_str:
-                parts = m_str.split("-")
-                if len(parts) >= 2:
-                    m_code = parts[1]
-            elif len(m_str) == 6:
-                m_code = m_str[4:6]
-
-            if m_code in target_months:
+            m_num, m_name = normalize_month_record(m)
+            if m_num in target_month_numbers:
+                records_matched_count += 1
                 p_val = m.get("total_precipitation_mm")
                 if isinstance(p_val, (int, float)):
                     seasonal_precip += float(p_val)
 
-                t_avg = m.get("avg_temperature_c")
+                t_avg = m.get("avg_temperature_c") if m.get("avg_temperature_c") is not None else m.get("mean_temperature_c")
                 if isinstance(t_avg, (int, float)):
                     matched_t2m.append(float(t_avg))
 
-                t_max = m.get("avg_max_temperature_c")
+                t_max = m.get("avg_max_temperature_c") if m.get("avg_max_temperature_c") is not None else m.get("max_temperature_c")
                 if isinstance(t_max, (int, float)):
                     matched_t2m_max.append(float(t_max))
 
-                t_min = m.get("avg_min_temperature_c")
+                t_min = m.get("avg_min_temperature_c") if m.get("avg_min_temperature_c") is not None else m.get("min_temperature_c")
                 if isinstance(t_min, (int, float)):
                     matched_t2m_min.append(float(t_min))
 
-                m_name = m.get("month_name", m_str)
-                if m_name not in months_found:
+                if m_name and m_name not in months_found:
                     months_found.append(m_name)
 
-                d_rec = m.get("days_recorded", 0)
-                if isinstance(d_rec, int):
-                    days_recorded_total += d_rec
+                d_rec = m.get("days_recorded") or m.get("days_in_month") or m.get("average_days") or 0
+                if isinstance(d_rec, (int, float)):
+                    days_recorded_total += round(d_rec)
 
     missing_month_names = [name for name in target_month_names if name not in months_found]
-    is_partial = len(missing_month_names) > 0 or not monthly_summary
+    is_partial = len(missing_month_names) > 0 or records_matched_count == 0
 
-    if not monthly_summary:
-        ann_precip_raw = annual_summary.get("total_precipitation_mm", 0.0)
-        ann_precip = float(ann_precip_raw) if isinstance(ann_precip_raw, (int, float)) else 0.0
-
-        if season_key == "Kharif":
-            seasonal_precip = round(ann_precip * 0.75, 2)
-        elif season_key == "Rabi":
-            seasonal_precip = round(ann_precip * 0.08, 2)
-        elif season_key == "Summer":
-            seasonal_precip = round(ann_precip * 0.17, 2)
-        else:
-            seasonal_precip = round(ann_precip, 2)
-
-        raw_t2m = annual_summary.get("avg_temperature_c", 25.0)
-        seasonal_t2m = float(raw_t2m) if isinstance(raw_t2m, (int, float)) else 25.0
-        raw_max = annual_summary.get("max_temperature_recorded_c", 38.0)
-        seasonal_max = float(raw_max) if isinstance(raw_max, (int, float)) else 38.0
-        raw_min = annual_summary.get("min_temperature_recorded_c", 14.0)
-        seasonal_min = float(raw_min) if isinstance(raw_min, (int, float)) else 14.0
-
+    # SCIENTIFIC CORRECTION (Item 3): REMOVE ALL SYNTHETIC PROPORTIONAL RAINFALL ALLOCATIONS
+    # Never calculate ann_precip * 0.75, 0.08, or 0.17 when monthly records are absent.
+    if records_matched_count == 0:
+        seasonal_precip_val: Optional[float] = None
+        raw_t2m = annual_summary.get("avg_temperature_c")
+        seasonal_t2m = float(raw_t2m) if isinstance(raw_t2m, (int, float)) else None
+        raw_max = annual_summary.get("max_temperature_recorded_c")
+        seasonal_max = float(raw_max) if isinstance(raw_max, (int, float)) else None
+        raw_min = annual_summary.get("min_temperature_recorded_c")
+        seasonal_min = float(raw_min) if isinstance(raw_min, (int, float)) else None
         data_note = (
-            f"Monthly summary not found in climate record; estimated proportional seasonal rainfall ({seasonal_precip:.1f} mm) "
-            "from cumulative observations with high uncertainty."
+            f"Monthly precipitation summary unavailable in climate record for {s_def['display_name']}. "
+            "Synthetic proportional allocations have been removed in accordance with scientific standards; "
+            "seasonal rainfall could not be determined from satellite records."
         )
     else:
-        seasonal_precip = round(seasonal_precip, 2)
+        seasonal_precip_val = round(seasonal_precip, 2)
+        seasonal_t2m = round(sum(matched_t2m) / len(matched_t2m), 2) if matched_t2m else annual_summary.get("avg_temperature_c")
+        seasonal_max = round(max(matched_t2m_max), 2) if matched_t2m_max else annual_summary.get("max_temperature_recorded_c")
+        seasonal_min = round(min(matched_t2m_min), 2) if matched_t2m_min else annual_summary.get("min_temperature_recorded_c")
 
-        if matched_t2m:
-            seasonal_t2m = round(sum(matched_t2m) / len(matched_t2m), 2)
-        else:
-            raw_t2m = annual_summary.get("avg_temperature_c", 25.0)
-            seasonal_t2m = float(raw_t2m) if isinstance(raw_t2m, (int, float)) else 25.0
-
-        if matched_t2m_max:
-            seasonal_max = round(max(matched_t2m_max), 2)
-        else:
-            raw_max = annual_summary.get("max_temperature_recorded_c", 38.0)
-            seasonal_max = float(raw_max) if isinstance(raw_max, (int, float)) else 38.0
-
-        if matched_t2m_min:
-            seasonal_min = round(min(matched_t2m_min), 2)
-        else:
-            raw_min = annual_summary.get("min_temperature_recorded_c", 14.0)
-            seasonal_min = float(raw_min) if isinstance(raw_min, (int, float)) else 14.0
-
-        if missing_month_names:
+        if is_climatology:
+            data_note = (
+                f"30-Year Historical Climatological Normal (1991–2020): {len(months_found)} of {len(target_month_names)} months evaluated "
+                f"({', '.join(months_found)}). Represents long-term climate normals, not measured current-year weather."
+            )
+        elif missing_month_names:
             data_note = (
                 f"Partial seasonal observations: {len(months_found)} of {len(target_month_names)} months evaluated "
                 f"({', '.join(months_found)}). Missing: {', '.join(missing_month_names)} "
@@ -343,11 +457,29 @@ def _extract_seasonal_climate(
         else:
             data_note = f"Complete seasonal observation record: {len(months_found)} of {len(target_month_names)} months evaluated."
 
+    # Climatology reference context for seasonal planning (especially Rabi when Dec is missing from daily data)
+    climatology_ref = None
+    if climatology_context and not is_climatology:
+        try:
+            clim_eval = _extract_seasonal_climate(climatology_context, assigned_season, climatology_context=None)
+            climatology_ref = {
+                "baseline_period": "1991–2020",
+                "seasonal_rainfall_normal_mm": clim_eval.get("seasonal_rainfall_mm"),
+                "seasonal_mean_temp_normal_c": clim_eval.get("seasonal_avg_temp_c"),
+                "seasonal_max_temp_normal_c": clim_eval.get("seasonal_max_temp_c"),
+                "seasonal_min_temp_normal_c": clim_eval.get("seasonal_min_temp_c"),
+                "months_included": clim_eval.get("months_evaluated", []),
+                "label": "30-Year Historical Climatological Reference (1991–2020 Normal)",
+                "note": "Climatological baseline provided for long-term seasonal planning context; not measured current-year weather."
+            }
+        except Exception:
+            climatology_ref = None
+
     return {
         "season_key": season_key,
         "display_name": s_def["display_name"],
         "window_description": s_def["window_description"],
-        "seasonal_rainfall_mm": seasonal_precip,
+        "seasonal_rainfall_mm": seasonal_precip_val,
         "months_evaluated": months_found,
         "months_missing": missing_month_names,
         "days_recorded": days_recorded_total,
@@ -357,7 +489,11 @@ def _extract_seasonal_climate(
         "seasonal_max_temp_c": seasonal_max,
         "seasonal_min_temp_c": seasonal_min,
         "characteristics": s_def["characteristics"],
-        "source": s_def["source"]
+        "source": s_def["source"],
+        "data_provenance": provenance_label,
+        "data_type": data_type,
+        "is_climatology": is_climatology,
+        "climatology_reference": climatology_ref
     }
 
 
@@ -365,12 +501,14 @@ def evaluate_climate_suitability(
     crop: Dict[str, Any],
     climate: Dict[str, Any],
     irrigation_type: str,
-    farm_soil: str = "Laterite soil",
-    assigned_season: str = "Kharif"
+    farm_soil: Optional[str] = None,
+    assigned_season: str = "Kharif",
+    climatology_context: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """
     Evaluate seasonal temperature and precipitation boundaries from NASA POWER observations and irrigation capability.
     Replaces cumulative annual YTD rainfall with season-specific rainfall aligned with UAS Bengaluru & ICAR calendars.
+    Supports complete Rabi analysis without omitting November or December.
     """
     annual_summary = climate.get("annual_summary", {})
     raw_ann_precip = annual_summary.get("total_precipitation_mm", 0.0)
@@ -385,7 +523,7 @@ def evaluate_climate_suitability(
     low_water, high_water = _parse_water_bounds_mm(water_spec)
 
     # Extract seasonal NASA POWER climate metrics
-    s_clim = _extract_seasonal_climate(climate, assigned_season)
+    s_clim = _extract_seasonal_climate(climate, assigned_season, climatology_context=climatology_context)
     seasonal_precip = s_clim["seasonal_rainfall_mm"]
     seasonal_t2m = s_clim["seasonal_avg_temp_c"]
     seasonal_max = s_clim["seasonal_max_temp_c"]
@@ -395,11 +533,11 @@ def evaluate_climate_suitability(
     thermal_score = 18
     thermal_status = "Optimal"
     thermal_rationale = (
-        f"NASA seasonal observed mean temperature of {seasonal_t2m}°C (range {seasonal_min}°C–{seasonal_max}°C during {s_clim['display_name']}) "
+        f"NASA seasonal mean temperature of {seasonal_t2m}°C (range {seasonal_min}°C–{seasonal_max}°C during {s_clim['display_name']}) "
         f"aligns with published agronomic limits for {crop_name} ({temp_spec})."
     )
 
-    if seasonal_max and seasonal_max > 38.0 and any(w in crop_name.lower() for w in ["paddy", "maize", "soybean"]):
+    if seasonal_max and seasonal_max > 38.0 and (is_paddy_crop(crop_name) or any(w in crop_name.lower() for w in ["maize", "soybean"])):
         thermal_score = 14
         thermal_status = "Moderate"
         thermal_rationale = (
@@ -416,36 +554,60 @@ def evaluate_climate_suitability(
 
     # 2. Water & Irrigation alignment (Max 25 pts) - SEASONAL EVALUATION
     is_irrigated = any(i in irrigation_type.lower() for i in ["borewell", "canal", "drip", "sprinkler", "mixed", "open well"])
-    farm_soil_clean = (farm_soil or "Laterite soil").strip().lower()
-    has_heavy_soil = any(s in farm_soil_clean for s in ["black", "clay", "vertisol", "alluvial"])
+    farm_soil_str = (farm_soil.strip().lower() if farm_soil is not None else "")
+    farm_soil_is_unknown = (
+        not farm_soil_str
+        or farm_soil_str in ["none", "null", "undefined"]
+        or "unknown" in farm_soil_str
+        or farm_soil_str in ["other", "other / unknown", "not specified", "unspecified"]
+    )
+    has_heavy_soil = False if farm_soil_is_unknown else any(s in farm_soil_str for s in ["black", "clay", "vertisol", "alluvial"])
 
     water_score = 20
     water_status = "Moderate"
     water_rationale = ""
     residual_moisture_dependency = False
 
-    if is_irrigated:
+    # Check for missing precipitation data (no synthetic allocation)
+    if seasonal_precip is None:
+        if is_irrigated:
+            water_score = 20
+            water_status = "Moderate"
+            water_rationale = (
+                f"Controlled irrigation ({irrigation_type}) is available to buffer {crop_name}'s water requirement "
+                f"({low_water:.0f}–{high_water:.0f} mm), but measured seasonal precipitation observations are unavailable "
+                f"for {s_clim['display_name']}."
+            )
+        else:
+            water_score = 0
+            water_status = "Insufficient data"
+            water_rationale = (
+                f"Measured seasonal precipitation observations are unavailable for {assigned_season} ({s_clim['display_name']}). "
+                "Synthetic rainfall allocations have been removed in accordance with scientific standards. "
+                "Cannot evaluate rainfed water adequacy without measured precipitation records."
+            )
+    elif is_irrigated:
         # Irrigated systems: irrigation reliably buffers seasonal deficits
         if assigned_season == "Perennial":
             water_score = 23
             water_status = "Optimal"
             water_rationale = (
                 f"Controlled {irrigation_type} reliably sustains perennial water requirement ({low_water:.0f}–{high_water:.0f} mm / 15–20 L/palm/day) "
-                f"through extended dry months. NASA observed annual rainfall ({rainfall_ytd:.1f} mm) replenishes aquifer storage."
+                f"through extended dry months. NASA annual rainfall ({rainfall_ytd:.1f} mm) replenishes aquifer storage."
             )
         elif seasonal_precip >= low_water:
             water_score = 24
             water_status = "Optimal"
             water_rationale = (
                 f"Controlled irrigation ({irrigation_type}) buffers crop water requirement ({low_water:.0f}–{high_water:.0f} mm). "
-                f"High seasonal precipitation ({seasonal_precip:.1f} mm observed in {s_clim['display_name']}) provides primary moisture, "
+                f"High seasonal precipitation ({seasonal_precip:.1f} mm in {s_clim['display_name']}) provides primary moisture, "
                 "significantly reducing groundwater pumping demand and power costs."
             )
         else:
             water_score = 22
             water_status = "Optimal"
             water_rationale = (
-                f"Low in-season precipitation ({seasonal_precip:.1f} mm observed in {s_clim['display_name']}) is fully buffered "
+                f"Low in-season precipitation ({seasonal_precip:.1f} mm in {s_clim['display_name']}) is fully buffered "
                 f"by controlled {irrigation_type} to meet {crop_name}'s water requirement ({low_water:.0f}–{high_water:.0f} mm). "
                 "Continuous irrigation during dry months requires dependable water table access."
             )
@@ -456,15 +618,15 @@ def evaluate_climate_suitability(
             water_status = "Challenging"
             water_rationale = (
                 f"Arecanut requires 1500–2500 mm distributed precipitation. In rainfed Malnad tracts, prolonged 5–6 month dry spells "
-                f"(observed annual rainfall {rainfall_ytd:.1f} mm) cause severe moisture stress, crown wilting, and premature nut drop without supplemental basin irrigation."
+                f"(annual rainfall {rainfall_ytd:.1f} mm) cause severe moisture stress, crown wilting, and premature nut drop without supplemental basin irrigation."
             )
         elif assigned_season == "Kharif":
-            if "paddy" in crop_name.lower():
+            if is_paddy_crop(crop_name):
                 if seasonal_precip >= 1000:
                     water_score = 22
                     water_status = "Optimal"
                     water_rationale = (
-                        f"Rainfed Kharif monsoon rainfall ({seasonal_precip:.1f} mm observed) delivers adequate water depth "
+                        f"Rainfed Kharif monsoon rainfall ({seasonal_precip:.1f} mm recorded) delivers adequate water depth "
                         f"for lowland paddy valleys (1100–1400 mm required)."
                     )
                 else:
@@ -492,7 +654,15 @@ def evaluate_climate_suitability(
         elif assigned_season == "Rabi":
             # Post-monsoon / winter: low in-season rainfall (typically 20–60 mm)
             residual_moisture_dependency = True
-            if has_heavy_soil:
+            if farm_soil_is_unknown:
+                water_score = 0
+                water_status = "Insufficient data"
+                water_rationale = (
+                    f"Rabi post-monsoon cropping under rainfed conditions depends entirely on residual soil moisture. "
+                    "Because soil classification is unspecified or unknown, subsoil water-holding capacity cannot be assessed. "
+                    f"A laboratory soil test or verified classification is required to determine whether residual moisture can sustain {crop_name}."
+                )
+            elif has_heavy_soil:
                 water_score = 16
                 water_status = "Moderate"
                 water_rationale = (
@@ -505,7 +675,7 @@ def evaluate_climate_suitability(
                 water_status = "Challenging"
                 water_rationale = (
                     f"Critical seasonal moisture deficit: Observed Rabi rainfall is only {seasonal_precip:.1f} mm against {low_water:.0f}–{high_water:.0f} mm required by {crop_name}. "
-                    f"In {farm_soil}, rapid drainage and low moisture retention capacity make rainfed post-monsoon cropping highly vulnerable to terminal drought "
+                    f"In {farm_soil or 'unbuffered light soil'}, rapid drainage and low moisture retention capacity make rainfed post-monsoon cropping highly vulnerable to terminal drought "
                     "during flowering and pod set without supplemental protective irrigation."
                 )
         else:  # Summer
@@ -529,6 +699,9 @@ def evaluate_climate_suitability(
         "data_completeness_note": s_clim["data_completeness_note"],
         "seasonal_characteristics": s_clim["characteristics"],
         "seasonal_source": s_clim["source"],
+        "data_provenance": s_clim.get("data_provenance"),
+        "data_type": s_clim.get("data_type"),
+        "climatology_reference": s_clim.get("climatology_reference"),
         "irrigation_buffer_active": is_irrigated,
         "residual_moisture_dependency": residual_moisture_dependency,
         "thermal_score": thermal_score,
@@ -541,7 +714,7 @@ def evaluate_climate_suitability(
         "rainfall_suitability": rainfall_spec,
         "nasa_rainfall_ytd_mm": rainfall_ytd,
         "nasa_avg_temp_c": seasonal_t2m,
-        "nasa_temp_range": f"{seasonal_min}°C – {seasonal_max}°C"
+        "nasa_temp_range": f"{seasonal_min}°C – {seasonal_max}°C" if seasonal_min is not None and seasonal_max is not None else "N/A"
     }
 
 
@@ -767,24 +940,151 @@ def evaluate_priority_alignment(
     }
 
 
-def _extract_score(sc: Dict[str, Any]) -> float:
-    hs = sc.get("heuristic_score")
-    if isinstance(hs, dict):
-        val = hs.get("total_score")
-        if isinstance(val, (int, float)):
-            return float(val)
-    return 0.0
+def aggregate_crop_statuses(statuses: List[str]) -> str:
+    """
+    Apply Liebig's Law of the Minimum to aggregate a sequence of per-crop statuses:
+    1. If any crop has 'Insufficient data' -> 'Insufficient data'
+    2. Else if any crop has 'Challenging' -> 'Challenging'
+    3. Else if any crop has 'Moderate' -> 'Moderate'
+    4. Else (all Optimal) -> 'Optimal'
+    """
+    if not statuses:
+        return "Insufficient data"
+    if any(s == "Insufficient data" for s in statuses):
+        return "Insufficient data"
+    if any(s == "Challenging" for s in statuses):
+        return "Challenging"
+    if any(s == "Moderate" for s in statuses):
+        return "Moderate"
+    if all(s == "Optimal" for s in statuses):
+        return "Optimal"
+    return "Moderate"
+
+
+def synthesize_qualitative_suitability(
+    soil_status: str,
+    water_status: str,
+    thermal_status: str,
+    rotation_status: str,
+    calendar_status: str,
+    has_insufficient_data: bool = False,
+    crop_limiting_factors: Optional[List[str]] = None
+) -> Dict[str, Any]:
+    """
+    Synthesize transparent qualitative category:
+      - 'Optimal'
+      - 'Moderate'
+      - 'Challenging'
+      - 'Insufficient data'
+    Determined strictly through biophysical limiting factors (Liebig's Law of the Minimum),
+    without arbitrary numerical score weighting or cutoff thresholds.
+    """
+    supporting_factors: List[str] = []
+    limiting_factors: List[str] = []
+
+    if crop_limiting_factors:
+        limiting_factors.extend(crop_limiting_factors)
+
+    if has_insufficient_data or water_status == "Insufficient data" or soil_status == "Insufficient data":
+        data_notes = []
+        if has_insufficient_data or water_status == "Insufficient data":
+            data_notes.append("Missing precipitation observation records for active seasonal window.")
+        if soil_status == "Insufficient data":
+            data_notes.append("Soil classification is unspecified or unknown; verified soil test or regional classification required.")
+
+        return {
+            "category": "Insufficient data",
+            "evaluation_label": "Biophysical Criteria Alignment (Qualitative)",
+            "explanation": "Essential agro-climatic or soil observation records are incomplete or unavailable to reliably determine suitability.",
+            "supporting_factors": supporting_factors,
+            "limiting_factors": data_notes + [lf for lf in limiting_factors if lf not in data_notes],
+            "factor_statuses": {
+                "soil": soil_status,
+                "water": water_status,
+                "thermal": thermal_status,
+                "rotation": rotation_status,
+                "calendar": calendar_status
+            }
+        }
+
+    if calendar_status == "Invalid":
+        return {
+            "category": "Challenging",
+            "evaluation_label": "Biophysical Criteria Alignment (Qualitative)",
+            "explanation": "Scenario contains agronomically invalid crop combinations (e.g. multi-decade perennial crops in an annual rotation sequence).",
+            "supporting_factors": [],
+            "limiting_factors": ["Agronomically invalid crop combination."] + limiting_factors,
+            "factor_statuses": {
+                "soil": soil_status,
+                "water": water_status,
+                "thermal": thermal_status,
+                "rotation": rotation_status,
+                "calendar": calendar_status
+            }
+        }
+
+    statuses = [
+        ("Soil Compatibility", soil_status),
+        ("Water & Moisture Security", water_status),
+        ("Thermal Alignment", thermal_status),
+        ("Rotation Dynamics & Soil Biology", rotation_status),
+        ("Seasonal Calendar Feasibility", calendar_status)
+    ]
+
+    for name, st in statuses:
+        if st == "Optimal":
+            supporting_factors.append(f"{name}: Favorable conditions with high agro-ecological alignment.")
+        elif st == "Moderate":
+            limiting_factors.append(f"{name}: Moderate alignment; requires management intervention or protective practices.")
+        elif st == "Challenging":
+            limiting_factors.append(f"{name}: Significant biophysical constraint or risk factor identified.")
+
+    if any(st == "Challenging" for _, st in statuses):
+        category = "Challenging"
+        explanation = (
+            "One or more critical biophysical constraints identified (e.g. soil impedance, severe moisture deficit, "
+            "or rotational pathogen risk) that require substantial mitigation."
+        )
+    elif any(st == "Moderate" for _, st in statuses):
+        category = "Moderate"
+        explanation = (
+            "Biophysically feasible rotation. Moderate management care (supplemental irrigation, organic additions, "
+            "or structured field turnaround) is advised for optimal results."
+        )
+    else:
+        category = "Optimal"
+        explanation = (
+            "Strong biophysical alignment across all evaluated dimensions: favorable soil tilth, balanced moisture security, "
+            "positive biological rotation dynamics, and harmonious calendar duration."
+        )
+
+    return {
+        "category": category,
+        "evaluation_label": "Biophysical Criteria Alignment (Qualitative)",
+        "explanation": explanation,
+        "supporting_factors": supporting_factors,
+        "limiting_factors": limiting_factors,
+        "factor_statuses": {
+            "soil": soil_status,
+            "water": water_status,
+            "thermal": thermal_status,
+            "rotation": rotation_status,
+            "calendar": calendar_status
+        }
+    }
 
 
 def compare_rotation_scenarios(
     farm: Dict[str, Any],
     climate_data: Dict[str, Any],
     scenarios_input: List[Dict[str, Any]],
-    crops_catalog: Dict[int, Dict[str, Any]]
+    crops_catalog: Dict[int, Dict[str, Any]],
+    climatology_context: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """
     Main entry point for comparing rotation scenarios.
-    Computes rigorous agronomic compatibility, heuristic scoring, and transparent disclosures.
+    Computes transparent qualitative categorical alignment, agronomic compatibility, and transparent disclosures.
+    Eliminates uncalibrated 0–100 numerical ranking.
     """
     evaluated_scenarios = []
 
@@ -807,10 +1107,11 @@ def compare_rotation_scenarios(
                     "Please refer to the dedicated Perennial Plantation advisory module."
                 )
 
-        # 1. Soil evaluation across crops
-        soil_evals = [evaluate_soil_compatibility(farm.get("soil_type", "Laterite soil"), c) for c in sequence_crops]
-        soil_score = sum(se["score"] for se in soil_evals) / len(soil_evals)
-        soil_status = "Optimal" if soil_score >= 22 else ("Moderate" if soil_score >= 16 else "Challenging")
+        # 1. Soil evaluation across crops (strictly evaluates provided soil without silent Laterite default)
+        raw_soil = farm.get("soil_type")
+        soil_evals = [evaluate_soil_compatibility(raw_soil, c) for c in sequence_crops]
+        soil_status = aggregate_crop_statuses([se["status"] for se in soil_evals])
+        soil_score = min(se["score"] for se in soil_evals)
 
         # 2. Climate & Thermal/Water evaluation using seasonal rainfall
         crop_seasons = assign_crop_seasons(farm.get("farming_season", "Kharif"), sequence_crops)
@@ -819,15 +1120,16 @@ def compare_rotation_scenarios(
                 crop=c,
                 climate=climate_data,
                 irrigation_type=farm.get("irrigation_type", "Rainfed"),
-                farm_soil=farm.get("soil_type", "Laterite soil"),
-                assigned_season=crop_seasons[i]
+                farm_soil=raw_soil,
+                assigned_season=crop_seasons[i],
+                climatology_context=climatology_context
             )
             for i, c in enumerate(sequence_crops)
         ]
-        thermal_score = sum(ce["thermal_score"] for ce in climate_evals) / len(climate_evals)
-        thermal_status = "Optimal" if thermal_score >= 17 else ("Moderate" if thermal_score >= 13 else "Challenging")
-        water_score = sum(ce["water_score"] for ce in climate_evals) / len(climate_evals)
-        water_status = "Optimal" if water_score >= 21 else ("Moderate" if water_score >= 16 else "Challenging")
+        thermal_status = aggregate_crop_statuses([ce["thermal_status"] for ce in climate_evals])
+        thermal_score = min(ce["thermal_score"] for ce in climate_evals)
+        water_status = aggregate_crop_statuses([ce["water_status"] for ce in climate_evals])
+        water_score = min(ce["water_score"] for ce in climate_evals)
 
         # 3. Rotation dynamics
         rotation_eval = evaluate_rotation_dynamics(farm.get("previous_crop", ""), sequence_crops)
@@ -838,9 +1140,42 @@ def compare_rotation_scenarios(
         # 5. Farmer priority alignment
         priority_eval = evaluate_priority_alignment(farm.get("primary_priority", "Climate resilience"), sequence_crops, rotation_eval, soil_evals)
 
-        # Calculate Total Heuristic Score (Out of 100)
-        # Weights: Soil (25) + Water (25) + Rotation Dynamics (20) + Thermal (20) + Calendar (10) = 100
-        total_heuristic_score = round(soil_score + water_score + rotation_eval["score"] + thermal_score + calendar_eval["score"], 1)
+        # 6. Collect crop-specific limiting constraints so they remain visible at rotation level
+        crop_limiting_factors: List[str] = []
+        for i, c in enumerate(sequence_crops):
+            c_name = c.get("crop_name", f"Crop {i+1}")
+            s_name = crop_seasons[i]
+            ce = climate_evals[i]
+            se = soil_evals[i]
+            if ce.get("water_status") == "Challenging":
+                crop_limiting_factors.append(f"Water constraint for {c_name} in {s_name}: {ce.get('water_rationale')}")
+            elif ce.get("water_status") == "Insufficient data":
+                crop_limiting_factors.append(f"Water data missing for {c_name} in {s_name}: {ce.get('water_rationale')}")
+            if se.get("status") == "Challenging":
+                crop_limiting_factors.append(f"Soil constraint for {c_name}: {se.get('rationale')}")
+            elif se.get("status") == "Insufficient data":
+                crop_limiting_factors.append(f"Soil data missing for {c_name}: {se.get('rationale')}")
+
+        # Qualitative Synthesis (Categorical Classification via Liebig's Law of the Minimum)
+        # Categories: "Optimal", "Moderate", "Challenging", "Insufficient data"
+        has_insufficient_rainfall = any(ce.get("seasonal_rainfall_mm") is None and not ce.get("irrigation_buffer_active") for ce in climate_evals)
+        qual_eval = synthesize_qualitative_suitability(
+            soil_status=soil_status,
+            water_status=water_status,
+            thermal_status=thermal_status,
+            rotation_status=rotation_eval["status"],
+            calendar_status=calendar_eval["status"],
+            has_insufficient_data=has_insufficient_rainfall,
+            crop_limiting_factors=crop_limiting_factors
+        )
+
+        # C-01: Correct Lowland Paddy vs Upland Drainage Guidance
+        has_lowland_paddy = any(is_paddy_crop(c) for c in sequence_crops)
+        drainage_guidance = (
+            "Lowland paddies require perimeter bunding to hold saturated water depths."
+            if has_lowland_paddy
+            else f"Drainage management: {raw_soil or 'Agricultural soil'} in high-rainfall spells requires raised beds or drainage furrows to avoid standing water."
+        )
 
         # Compile comprehensive scenario result
         evaluated_scenarios.append({
@@ -848,6 +1183,8 @@ def compare_rotation_scenarios(
             "crop_ids": crop_ids,
             "crop_names": [c["crop_name"] for c in sequence_crops],
             "crop_sequence_display": " → ".join([c["crop_name"] for c in sequence_crops]),
+            "qualitative_suitability": qual_eval,
+            "suitability_category": qual_eval["category"],
             "crops_detailed": [
                 {
                     "id": c["id"],
@@ -861,27 +1198,28 @@ def compare_rotation_scenarios(
                     "seasonal_window": climate_evals[i]["seasonal_window"],
                     "seasonal_rainfall_mm": climate_evals[i]["seasonal_rainfall_mm"],
                     "is_partial_data": climate_evals[i]["is_partial_data"],
-                    "residual_moisture_dependency": climate_evals[i]["residual_moisture_dependency"]
+                    "residual_moisture_dependency": climate_evals[i]["residual_moisture_dependency"],
+                    "data_provenance": climate_evals[i].get("data_provenance"),
+                    "climatology_reference": climate_evals[i].get("climatology_reference")
                 }
                 for i, c in enumerate(sequence_crops)
             ],
             "heuristic_score": {
-                "total_score": total_heuristic_score,
-                "score_out_of": 100,
+                "category": qual_eval["category"],
                 "evaluation_label": "Biophysical Criteria Alignment (Qualitative)",
                 "score_label": "Biophysical Criteria Alignment (Qualitative)",
                 "weights_and_breakdown": {
-                    "soil_compatibility": {"score": round(soil_score, 1), "max": 25, "weight_pct": "25%"},
-                    "water_and_irrigation": {"score": round(water_score, 1), "max": 25, "weight_pct": "25%"},
-                    "rotation_dynamics": {"score": round(rotation_eval["score"], 1), "max": 20, "weight_pct": "20%"},
-                    "thermal_climate": {"score": round(thermal_score, 1), "max": 20, "weight_pct": "20%"},
-                    "seasonal_calendar": {"score": round(calendar_eval["score"], 1), "max": 10, "weight_pct": "10%"}
+                    "soil_compatibility": {"status": soil_status, "score": round(soil_score, 1), "max": 25},
+                    "water_and_irrigation": {"status": water_status, "score": round(water_score, 1), "max": 25},
+                    "rotation_dynamics": {"status": rotation_eval["status"], "score": round(rotation_eval["score"], 1), "max": 20},
+                    "thermal_climate": {"status": thermal_status, "score": round(thermal_score, 1), "max": 20},
+                    "seasonal_calendar": {"status": calendar_eval["status"], "score": round(calendar_eval["score"], 1), "max": 10}
                 },
-                "disclaimer": "Experimental unvalidated heuristic index based on published ICAR / UAS agronomic boundaries and NASA POWER environmental estimates. Not a validated empirical score, crop yield prediction, or economic profitability forecast."
+                "disclaimer": "Categorical biophysical alignment based on published ICAR / UAS agronomic boundaries and NASA POWER environmental estimates. Not an empirical yield forecast or economic profitability projection."
             },
             "soil_compatibility": {
                 "overall_status": soil_status,
-                "farm_soil": farm.get("soil_type", "Laterite soil"),
+                "farm_soil": raw_soil or "Unspecified / Unknown",
                 "per_crop_evaluations": soil_evals
             },
             "climate_compatibility": {
@@ -893,8 +1231,7 @@ def compare_rotation_scenarios(
             "calendar_and_season": calendar_eval,
             "priority_alignment": priority_eval,
             "potential_limitations": (
-                rotation_eval["risks"] +
-                [f"Drainage management: {farm.get('soil_type', 'Laterite')} in high-rainfall spells requires raised beds or drainage furrows to avoid standing water." if "paddy" not in [c["crop_name"].lower() for c in sequence_crops] else "Lowland paddies require perimeter bunding to hold saturated water depths."]
+                rotation_eval["risks"] + [drainage_guidance]
             ),
             "missing_information": [
                 "Farm-specific soil pH, organic carbon content, and electrical conductivity assays.",

@@ -3705,6 +3705,16 @@
   color: #92400e;
 }
 
+.st-challenging {
+  background-color: #ffe4e6;
+  color: #9f1239;
+}
+
+.st-insufficient {
+  background-color: #f1f5f9;
+  color: #475569;
+}
+
 .factor-desc {
   font-size: 0.82rem;
   color: #475569;
