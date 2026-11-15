@@ -52,6 +52,7 @@ default_origins = [
     "http://127.0.0.1:5174",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "https://krishiorbit.vercel.app",
 ]
 
 # Read configured deployment origins from environment variable (comma-separated, exact origins only)
