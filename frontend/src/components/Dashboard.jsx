@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE_URL } from '../apiConfig';
 import {
   MonthlyRainfallChart,
   MonthlyTemperatureChart,
@@ -14,7 +15,7 @@ export default function Dashboard({ backendHealth, onOpenCrops, onOpenFarmProfil
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/nasa-power');
+      const res = await fetch(`${API_BASE_URL}/api/nasa-power`);
       if (!res.ok) {
         const errorBody = await res.json().catch(() => ({}));
         throw new Error(errorBody.detail || `Server responded with status ${res.status}`);

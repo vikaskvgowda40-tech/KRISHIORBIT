@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE_URL } from '../apiConfig';
 
-const API_PROFILES = 'http://127.0.0.1:8000/api/farm-profiles';
-const API_CROPS = 'http://127.0.0.1:8000/api/crops';
-const API_NASA = 'http://127.0.0.1:8000/api/nasa-power';
-const API_NASA_CLIMATOLOGY = 'http://127.0.0.1:8000/api/nasa-power/climatology';
-const API_COMPARE = 'http://127.0.0.1:8000/api/rotation/compare';
+const API_PROFILES = `${API_BASE_URL}/api/farm-profiles`;
+const API_CROPS = `${API_BASE_URL}/api/crops`;
+const API_NASA = `${API_BASE_URL}/api/nasa-power`;
+const API_NASA_CLIMATOLOGY = `${API_BASE_URL}/api/nasa-power/climatology`;
+const API_COMPARE = `${API_BASE_URL}/api/rotation/compare`;
 
 const PRESET_SCENARIOS = [
   {

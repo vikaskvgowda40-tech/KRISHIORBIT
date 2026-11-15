@@ -44,8 +44,8 @@ app = FastAPI(
     openapi_url="/openapi.json"
 )
 
-# CORS configuration to allow frontend communication across localhost & 127.0.0.1
-origins = [
+# CORS configuration: Localhost origins for local development + exact origins from CORS_ORIGINS
+default_origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://localhost:5174",
@@ -54,9 +54,21 @@ origins = [
     "http://127.0.0.1:3000",
 ]
 
+# Read configured deployment origins from environment variable (comma-separated, exact origins only)
+# e.g. CORS_ORIGINS="https://krishiorbit.vercel.app,https://krishiorbit-frontend.vercel.app"
+custom_origins_env = os.getenv("CORS_ORIGINS", "").strip()
+configured_origins = [
+    origin.strip().rstrip("/")
+    for origin in custom_origins_env.split(",")
+    if origin.strip() and origin.strip() != "*"
+]
+
+# Combine local development origins with exact configured deployment origins (no wildcards)
+allowed_origins = list(dict.fromkeys(default_origins + configured_origins))
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=allowed_origins,
     allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],

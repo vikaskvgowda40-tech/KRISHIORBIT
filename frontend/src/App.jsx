@@ -6,6 +6,7 @@ import FarmProfile from './components/FarmProfile';
 import CropIntelligence from './components/CropIntelligence';
 import CropRotationSimulator from './components/CropRotationSimulator';
 import MarketIntelligence from './components/MarketIntelligence';
+import { API_BASE_URL } from './apiConfig';
 import './App.css';
 
 export default function App() {
@@ -17,7 +18,7 @@ export default function App() {
   useEffect(() => {
     const checkBackend = async () => {
       try {
-        const res = await fetch('http://127.0.0.1:8000/api/health');
+        const res = await fetch(`${API_BASE_URL}/api/health`);
         if (res.ok) {
           const data = await res.json();
           setBackendHealth(data);

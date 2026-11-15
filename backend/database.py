@@ -3,16 +3,22 @@ KRISHIORBIT Database Module
 SQLite persistent storage for Farm Profiles and future agronomic metadata.
 """
 
+import os
 import sqlite3
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
-DB_PATH = Path(__file__).resolve().parent / "krishiorbit.db"
+# Configurable database path for production deployments and persistent storage volumes
+# Override via environment variable DATABASE_PATH or DB_PATH (e.g. /data/krishiorbit.db on Render persistent disk)
+DEFAULT_DB_PATH = Path(__file__).resolve().parent / "krishiorbit.db"
+DB_PATH = Path(os.getenv("DATABASE_PATH") or os.getenv("DB_PATH") or DEFAULT_DB_PATH)
 
 
 def get_db_connection() -> sqlite3.Connection:
     """Create and return a SQLite database connection with row factory."""
+    # Ensure parent directory exists (especially for external or mounted persistent volumes)
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
@@ -95,9 +101,63 @@ def init_db():
         if cursor.fetchone()[0] == 0:
             seed_initial_crops(cursor)
 
+        # Auto-seed default demo farm profile ONLY if farm_profiles table is empty
+        cursor.execute("SELECT COUNT(*) FROM farm_profiles")
+        if cursor.fetchone()[0] == 0:
+            seed_initial_demo_farm(cursor)
+
         conn.commit()
     finally:
         conn.close()
+
+
+def seed_initial_demo_farm(cursor: sqlite3.Cursor):
+    """
+    Seed the default demo farm profile ('Agumbe Valley Eco-Holding') ONLY if the farm_profiles table is empty.
+    Preserves exact agronomic, soil, acreage, and coordinate parameters for immediate simulation and testing.
+    """
+    now_iso = datetime.now(timezone.utc).isoformat()
+    cursor.execute("""
+        INSERT INTO farm_profiles (
+            farm_name,
+            farmer_name,
+            village,
+            district,
+            state,
+            latitude,
+            longitude,
+            total_land_acres,
+            soil_type,
+            current_crop,
+            previous_crop,
+            farming_season,
+            irrigation_type,
+            primary_priority,
+            notes,
+            created_at,
+            updated_at
+        ) VALUES (
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        );
+    """, (
+        "Agumbe Valley Eco-Holding",
+        "Shrikant Hegde",
+        "Agumbe",
+        "Shivamogga",
+        "Karnataka",
+        13.5186,
+        75.0911,
+        6.8,
+        "Laterite soil",
+        "Paddy",
+        "Black Gram",
+        "Kharif",
+        "Rainfed",
+        "Climate resilience",
+        "High precipitation rainforest ridge; terraced paddy utilizing monsoon runoff.",
+        now_iso,
+        now_iso
+    ))
 
 
 def seed_initial_crops(cursor: sqlite3.Cursor):
@@ -299,7 +359,7 @@ def create_farm_profile(data: Dict[str, Any]) -> Dict[str, Any]:
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
-        now_iso = datetime.utcnow().isoformat() + "Z"
+        now_iso = datetime.now(timezone.utc).isoformat()
 
         cursor.execute("""
             INSERT INTO farm_profiles (
@@ -387,7 +447,7 @@ def update_farm_profile(profile_id: int, data: Dict[str, Any]) -> Optional[Dict[
         if not existing:
             return None
 
-        now_iso = datetime.utcnow().isoformat() + "Z"
+        now_iso = datetime.now(timezone.utc).isoformat()
 
         # Build dynamic update statement for provided fields
         fields_to_update = []
@@ -561,8 +621,8 @@ def list_local_mandi_observations(
     try:
         cursor = conn.cursor()
         query = "SELECT * FROM local_mandi_observations"
-        conditions = []
-        params = []
+        conditions: List[str] = []
+        params: List[Any] = []
 
         if district and isinstance(district, str) and district.strip():
             conditions.append("LOWER(district) = LOWER(?)")
@@ -576,7 +636,7 @@ def list_local_mandi_observations(
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
 
-        lim_val = int(limit) if isinstance(limit, (int, float)) else 50
+        lim_val = limit if isinstance(limit, int) else 50
         query += " ORDER BY id DESC LIMIT ?"
         params.append(lim_val)
 

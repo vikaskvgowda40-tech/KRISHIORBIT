@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE_URL } from '../apiConfig';
 
-const API_BASE = 'http://127.0.0.1:8000/api/crops';
+const API_BASE = `${API_BASE_URL}/api/crops`;
 
 const CATEGORIES = [
   { id: 'all', label: 'All Crops' },
